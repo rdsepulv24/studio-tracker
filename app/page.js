@@ -23,6 +23,8 @@ export default function StudioTracker() {
   const [editingGoalCategory, setEditingGoalCategory] = useState(null);
   const [saveStatus, setSaveStatus] = useState('');
   const [expandedProjects, setExpandedProjects] = useState({});
+  const [editingEntry, setEditingEntry] = useState(null);
+  const [showProjectHoursDetail, setShowProjectHoursDetail] = useState(null);
 
   const [data, setData] = useState({
     timeEntries: [],
@@ -30,6 +32,7 @@ export default function StudioTracker() {
     goalCategories: [],
     weeklyNotes: [],
     billingRate: 150,
+    revenueGoal: 220000,
     header: { title: 'Studio', subtitle: '$220k goal — Year 2' }
   });
 
@@ -77,6 +80,7 @@ export default function StudioTracker() {
     ],
     weeklyNotes: [],
     billingRate: 150,
+    revenueGoal: 220000,
     header: { title: 'Studio', subtitle: '$220k goal — Year 2' }
   };
 
@@ -132,6 +136,18 @@ export default function StudioTracker() {
   const addTimeEntry = (hours, category, project, date = null, description = '') => {
     const entry = { id: Date.now(), date: date || new Date().toISOString(), hours: Math.round(hours * 100) / 100, category, project, description };
     saveData({ ...data, timeEntries: [...data.timeEntries, entry] });
+  };
+
+  const updateTimeEntry = (id, updates) => {
+    const newEntries = data.timeEntries.map(entry => entry.id === id ? { ...entry, ...updates } : entry);
+    saveData({ ...data, timeEntries: newEntries });
+    setEditingEntry(null);
+  };
+
+  const deleteTimeEntry = (id) => {
+    const newEntries = data.timeEntries.filter(entry => entry.id !== id);
+    saveData({ ...data, timeEntries: newEntries });
+    setEditingEntry(null);
   };
 
   const addProject = (name, totalFee, type, phaseFees) => {
@@ -234,6 +250,20 @@ export default function StudioTracker() {
   const totalWeeklyHours = Object.values(weeklyHours).reduce((a, b) => a + b, 0);
   const toggleProjectExpanded = (projectId) => { setExpandedProjects(prev => ({ ...prev, [projectId]: !prev[projectId] })); };
 
+  const getProjectHoursByCategory = (projectName) => {
+    return data.timeEntries.filter(e => e.project === projectName).reduce((acc, e) => { acc[e.category] = (acc[e.category] || 0) + e.hours; return acc; }, {});
+  };
+
+  const getProjectWeeklyHours = (projectName) => {
+    const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
+    return data.timeEntries.filter(e => e.project === projectName && new Date(e.date) > weekAgo).reduce((sum, e) => sum + e.hours, 0);
+  };
+
+  const getProjectMonthlyHours = (projectName) => {
+    const monthAgo = new Date(); monthAgo.setDate(monthAgo.getDate() - 30);
+    return data.timeEntries.filter(e => e.project === projectName && new Date(e.date) > monthAgo).reduce((sum, e) => sum + e.hours, 0);
+  };
+
   if (loading) return <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 flex items-center justify-center"><div className="text-slate-400">Loading...</div></div>;
 
   return (
@@ -272,13 +302,13 @@ export default function StudioTracker() {
                 <div className="text-slate-400 text-sm font-medium tracking-wide uppercase mb-2">2026 Revenue Goal</div>
                 <div className="flex items-baseline gap-3 mb-6">
                   <span className="text-4xl font-light text-white tracking-tight">${getTotalPaid2026().toLocaleString()}</span>
-                  <span className="text-slate-500">of $220,000</span>
+                  <span className="text-slate-500">of ${(data.revenueGoal || 220000).toLocaleString()}</span>
                 </div>
                 <div className="space-y-3">
                   <div className="relative h-3 bg-slate-700/50 rounded-full overflow-hidden">
-                    <div className="absolute inset-y-0 left-0 bg-slate-600 rounded-full transition-all duration-500" style={{ width: `${Math.min((getProjectedRevenue2026() / 220000) * 100, 100)}%` }} />
-                    <div className="absolute inset-y-0 left-0 bg-amber-500/80 rounded-full transition-all duration-500" style={{ width: `${Math.min((getTotalBilled2026() / 220000) * 100, 100)}%` }} />
-                    <div className="absolute inset-y-0 left-0 bg-gradient-to-r from-emerald-400 to-emerald-500 rounded-full transition-all duration-500 shadow-lg shadow-emerald-500/30" style={{ width: `${Math.min((getTotalPaid2026() / 220000) * 100, 100)}%` }} />
+                    <div className="absolute inset-y-0 left-0 bg-slate-600 rounded-full transition-all duration-500" style={{ width: `${Math.min((getProjectedRevenue2026() / (data.revenueGoal || 220000)) * 100, 100)}%` }} />
+                    <div className="absolute inset-y-0 left-0 bg-amber-500/80 rounded-full transition-all duration-500" style={{ width: `${Math.min((getTotalBilled2026() / (data.revenueGoal || 220000)) * 100, 100)}%` }} />
+                    <div className="absolute inset-y-0 left-0 bg-gradient-to-r from-emerald-400 to-emerald-500 rounded-full transition-all duration-500 shadow-lg shadow-emerald-500/30" style={{ width: `${Math.min((getTotalPaid2026() / (data.revenueGoal || 220000)) * 100, 100)}%` }} />
                   </div>
                   <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs">
                     <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500" /><span className="text-emerald-400 font-medium">${getTotalPaid2026().toLocaleString()}</span><span className="text-slate-500">paid</span></div>
@@ -397,13 +427,28 @@ export default function StudioTracker() {
               <div className="px-5 py-4 border-b border-slate-100"><h3 className="font-semibold text-slate-800">Recent Entries</h3></div>
               <div className="divide-y divide-slate-100">
                 {data.timeEntries.slice(-10).reverse().map(entry => (
-                  <div key={entry.id} className="px-5 py-4">
-                    <div className="flex items-center justify-between">
-                      <div><div className="font-medium text-slate-800">{categories.find(c => c.id === entry.category)?.label}</div><div className="text-sm text-slate-400 mt-0.5">{entry.project && <span className="text-slate-500">{entry.project} • </span>}{new Date(entry.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div></div>
-                      <div className="text-lg font-medium text-slate-800">{entry.hours}h</div>
+                  editingEntry?.id === entry.id ? (
+                    <EditTimeEntryForm
+                      key={entry.id}
+                      entry={entry}
+                      categories={categories}
+                      projects={data.projects}
+                      onSave={(updates) => updateTimeEntry(entry.id, updates)}
+                      onCancel={() => setEditingEntry(null)}
+                      onDelete={() => deleteTimeEntry(entry.id)}
+                    />
+                  ) : (
+                    <div key={entry.id} className="px-5 py-4 group">
+                      <div className="flex items-center justify-between">
+                        <div><div className="font-medium text-slate-800">{categories.find(c => c.id === entry.category)?.label}</div><div className="text-sm text-slate-400 mt-0.5">{entry.project && <span className="text-slate-500">{entry.project} • </span>}{new Date(entry.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div></div>
+                        <div className="flex items-center gap-2">
+                          <div className="text-lg font-medium text-slate-800">{entry.hours}h</div>
+                          <button onClick={() => setEditingEntry(entry)} className="p-2 text-slate-300 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all opacity-0 group-hover:opacity-100"><Edit2 className="w-4 h-4" /></button>
+                        </div>
+                      </div>
+                      {entry.description && <div className="mt-2 text-sm text-slate-500 bg-slate-50 rounded-lg px-3 py-2">{entry.description}</div>}
                     </div>
-                    {entry.description && <div className="mt-2 text-sm text-slate-500 bg-slate-50 rounded-lg px-3 py-2">{entry.description}</div>}
-                  </div>
+                  )
                 ))}
                 {data.timeEntries.length === 0 && <div className="px-5 py-12 text-center"><Clock className="w-10 h-10 mx-auto mb-3 text-slate-300" /><p className="text-slate-400">No time entries yet</p></div>}
               </div>
@@ -429,7 +474,45 @@ export default function StudioTracker() {
                       <div className="flex gap-1"><button onClick={() => setEditingProject(project)} className="p-2.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-all"><Edit2 className="w-4 h-4" /></button><button onClick={() => deleteProject(project.id)} className="p-2.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"><Trash2 className="w-4 h-4" /></button></div>
                     </div>
                     <div className="text-3xl font-light text-slate-900 mb-4">${project.fee.toLocaleString()}</div>
-                    {projectHours > 0 && <div className="mb-4 p-3 bg-slate-50 rounded-xl"><div className="flex items-center justify-between text-sm"><div className="flex items-center gap-2"><Clock className="w-4 h-4 text-slate-400" /><span className="text-slate-600">{projectHours.toFixed(1)} hrs tracked</span></div><span className="font-medium text-blue-600">${projectTimeValue.toLocaleString()} value</span></div></div>}
+                    {projectHours > 0 && (
+                      <div className="mb-4">
+                        <button onClick={() => setShowProjectHoursDetail(showProjectHoursDetail === project.id ? null : project.id)} className="w-full p-3 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors">
+                          <div className="flex items-center justify-between text-sm">
+                            <div className="flex items-center gap-2"><Clock className="w-4 h-4 text-slate-400" /><span className="text-slate-600">{projectHours.toFixed(1)} hrs tracked</span><ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showProjectHoursDetail === project.id ? 'rotate-180' : ''}`} /></div>
+                            <span className="font-medium text-blue-600">${projectTimeValue.toLocaleString()} value</span>
+                          </div>
+                        </button>
+                        {showProjectHoursDetail === project.id && (
+                          <div className="mt-2 p-3 bg-slate-50 rounded-xl space-y-3">
+                            <div className="grid grid-cols-3 gap-2 text-center">
+                              <div className="bg-white rounded-lg p-2"><div className="text-lg font-medium text-slate-800">{getProjectWeeklyHours(project.name).toFixed(1)}</div><div className="text-xs text-slate-500">This Week</div></div>
+                              <div className="bg-white rounded-lg p-2"><div className="text-lg font-medium text-slate-800">{getProjectMonthlyHours(project.name).toFixed(1)}</div><div className="text-xs text-slate-500">This Month</div></div>
+                              <div className="bg-white rounded-lg p-2"><div className="text-lg font-medium text-slate-800">{projectHours.toFixed(1)}</div><div className="text-xs text-slate-500">All Time</div></div>
+                            </div>
+                            <div className="pt-2 border-t border-slate-200">
+                              <div className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">By Category</div>
+                              <div className="space-y-2">
+                                {Object.entries(getProjectHoursByCategory(project.name)).sort(([,a], [,b]) => b - a).map(([catId, hrs]) => {
+                                  const cat = categories.find(c => c.id === catId);
+                                  const percent = projectHours > 0 ? (hrs / projectHours) * 100 : 0;
+                                  return (
+                                    <div key={catId}>
+                                      <div className="flex items-center justify-between text-sm mb-1">
+                                        <span className="text-slate-600">{cat?.label || catId}</span>
+                                        <span className="font-medium text-slate-700">{hrs.toFixed(1)}h</span>
+                                      </div>
+                                      <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                                        <div className="h-full rounded-full transition-all" style={{ width: `${percent}%`, backgroundColor: cat?.color || '#94a3b8' }} />
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="flex flex-wrap gap-2 mb-4">
                       <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 rounded-full"><div className="w-2 h-2 rounded-full bg-emerald-500" /><span className="text-sm font-medium text-emerald-700">${totalPaid.toLocaleString()}</span><span className="text-sm text-emerald-600">paid</span></div>
                       {unpaidAmount > 0 && <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 rounded-full"><div className="w-2 h-2 rounded-full bg-amber-500" /><span className="text-sm font-medium text-amber-700">${unpaidAmount.toLocaleString()}</span><span className="text-sm text-amber-600">outstanding</span></div>}
@@ -438,7 +521,7 @@ export default function StudioTracker() {
                     <button onClick={() => toggleProjectExpanded(project.id)} className="w-full flex items-center justify-between py-2 text-sm text-slate-500 hover:text-slate-700 transition-colors"><span>Phase Breakdown</span><ChevronDown className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} /></button>
                     {isExpanded && (
                       <div className="mt-3 space-y-3 pt-3 border-t border-slate-100">
-                        {phases.map(phase => { const billing = getPhaseBilling(project, phase.id); const hasPhase = billing.fee > 0 || billing.invoiced > 0; if (!hasPhase) return null; const phasePercent = billing.fee > 0 ? Math.round((billing.invoiced / billing.fee) * 100) : (billing.invoiced > 0 ? 100 : 0); return (<div key={phase.id}><div className="flex justify-between text-sm mb-1"><span className="text-slate-600">{phase.shortLabel}</span><span className="text-slate-500"><span className={billing.paid >= billing.fee && billing.fee > 0 ? 'text-emerald-600 font-medium' : ''}>${billing.invoiced.toLocaleString()}</span>{billing.fee > 0 && <span className="text-slate-300"> / ${billing.fee.toLocaleString()}</span>}<span className="ml-2 text-xs">({phasePercent}%)</span></span></div><div className="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className={`h-full rounded-full transition-all ${billing.paid >= billing.fee && billing.fee > 0 ? 'bg-emerald-500' : 'bg-blue-500'}`} style={{ width: `${Math.min(phasePercent, 100)}%` }} /></div></div>); })}
+                        {phases.map(phase => { const billing = getPhaseBilling(project, phase.id); const hasPhase = billing.fee > 0 || billing.invoiced > 0; if (!hasPhase) return null; const phasePercent = billing.fee > 0 ? Math.round((billing.paid / billing.fee) * 100) : (billing.paid > 0 ? 100 : 0); return (<div key={phase.id}><div className="flex justify-between text-sm mb-1"><span className="text-slate-600">{phase.shortLabel}</span><span className="text-slate-500"><span className={billing.paid >= billing.fee && billing.fee > 0 ? 'text-emerald-600 font-medium' : ''}>${billing.invoiced.toLocaleString()}</span>{billing.fee > 0 && <span className="text-slate-300"> / ${billing.fee.toLocaleString()}</span>}<span className="ml-2 text-xs">({phasePercent}%)</span></span></div><div className="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className={`h-full rounded-full transition-all ${billing.paid >= billing.fee && billing.fee > 0 ? 'bg-emerald-500' : 'bg-blue-500'}`} style={{ width: `${Math.min(phasePercent, 100)}%` }} /></div></div>); })}
                         {phases.every(phase => { const billing = getPhaseBilling(project, phase.id); return billing.fee === 0 && billing.invoiced === 0; }) && <p className="text-sm text-slate-400 text-center py-2">No phases set up yet</p>}
                       </div>
                     )}
@@ -478,7 +561,7 @@ export default function StudioTracker() {
       {editingProject && !editingProject.viewInvoices && <Modal onClose={() => setEditingProject(null)}><EditProjectForm project={editingProject} phases={phases} onSave={(updates) => updateProject(editingProject.id, updates)} /></Modal>}
       {editingProject && editingProject.viewInvoices && <Modal onClose={() => setEditingProject(null)}><ViewInvoicesModal project={editingProject} onMarkPaid={markInvoicePaid} onDelete={deleteInvoice} /></Modal>}
       {showInvoiceModal && <Modal onClose={() => setShowInvoiceModal(null)}><AddInvoiceForm project={showInvoiceModal} onAdd={(amount, phase, date) => { addInvoice(showInvoiceModal.id, amount, phase, date); setShowInvoiceModal(null); }} /></Modal>}
-      {showSettings && <Modal onClose={() => setShowSettings(false)}><SettingsForm billingRate={data.billingRate || 0} header={data.header || {}} onSave={(rate, header) => { saveData({ ...data, billingRate: parseFloat(rate) || 0, header }); setShowSettings(false); }} /></Modal>}
+      {showSettings && <Modal onClose={() => setShowSettings(false)}><SettingsForm billingRate={data.billingRate || 0} header={data.header || {}} revenueGoal={data.revenueGoal || 220000} onSave={(rate, header, goal) => { saveData({ ...data, billingRate: parseFloat(rate) || 0, header, revenueGoal: parseFloat(goal) || 220000 }); setShowSettings(false); }} /></Modal>}
       {showAddGoalCategory && <Modal onClose={() => setShowAddGoalCategory(false)}><AddGoalCategoryForm onAdd={(name, color) => { addGoalCategory(name, color); setShowAddGoalCategory(false); }} /></Modal>}
       {editingGoalCategory && <Modal onClose={() => setEditingGoalCategory(null)}><EditGoalCategoryForm category={editingGoalCategory} onSave={(updates) => { updateGoalCategory(editingGoalCategory.id, updates); setEditingGoalCategory(null); }} onDelete={() => { deleteGoalCategory(editingGoalCategory.id); setEditingGoalCategory(null); }} /></Modal>}
       {showAddGoal && <Modal onClose={() => setShowAddGoal(null)}><AddGoalForm onAdd={(text) => { addGoal(showAddGoal, text); setShowAddGoal(null); }} /></Modal>}
@@ -577,15 +660,17 @@ function ViewInvoicesModal({ project, onMarkPaid, onDelete }) {
   );
 }
 
-function SettingsForm({ billingRate, header, onSave }) {
+function SettingsForm({ billingRate, header, revenueGoal, onSave }) {
   const [rate, setRate] = useState(billingRate.toString()); const [title, setTitle] = useState(header.title || 'Studio'); const [subtitle, setSubtitle] = useState(header.subtitle || '$220k goal — Year 2');
+  const [goal, setGoal] = useState((revenueGoal || 220000).toString());
   return (
     <div className="space-y-5">
       <h3 className="text-xl font-semibold text-slate-900">Settings</h3>
       <div><label className="block text-sm font-medium text-slate-700 mb-2">App Title</label><input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl" /></div>
       <div><label className="block text-sm font-medium text-slate-700 mb-2">Subtitle</label><input type="text" value={subtitle} onChange={(e) => setSubtitle(e.target.value)} className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl" /></div>
+      <div><label className="block text-sm font-medium text-slate-700 mb-2">Revenue Goal ($)</label><input type="number" value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="220000" className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl" /></div>
       <div><label className="block text-sm font-medium text-slate-700 mb-2">Billing Rate ($/hr)</label><input type="number" value={rate} onChange={(e) => setRate(e.target.value)} className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl" /></div>
-      <button onClick={() => onSave(rate, { title, subtitle })} className="w-full bg-gradient-to-r from-slate-900 to-slate-800 text-white rounded-xl p-4 font-medium">Save Settings</button>
+      <button onClick={() => onSave(rate, { title, subtitle }, goal)} className="w-full bg-gradient-to-r from-slate-900 to-slate-800 text-white rounded-xl p-4 font-medium">Save Settings</button>
     </div>
   );
 }
@@ -624,6 +709,36 @@ function AddGoalForm({ onAdd }) {
       <h3 className="text-xl font-semibold text-slate-900">Add Goal</h3>
       <div><label className="block text-sm font-medium text-slate-700 mb-2">Goal</label><input type="text" value={text} onChange={(e) => setText(e.target.value)} placeholder="Complete project proposal" className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl" /></div>
       <button onClick={() => text && onAdd(text)} disabled={!text} className="w-full bg-gradient-to-r from-slate-900 to-slate-800 text-white rounded-xl p-4 font-medium disabled:opacity-50">Add Goal</button>
+    </div>
+  );
+}
+
+function EditTimeEntryForm({ entry, categories, projects, onSave, onCancel, onDelete }) {
+  const [hours, setHours] = useState(entry.hours.toString());
+  const [category, setCategory] = useState(entry.category);
+  const [project, setProject] = useState(entry.project || '');
+  const [date, setDate] = useState(new Date(entry.date).toISOString().split('T')[0]);
+  const [description, setDescription] = useState(entry.description || '');
+  return (
+    <div className="px-5 py-4 bg-slate-50 space-y-3">
+      <div className="flex gap-3">
+        <input type="number" step="0.25" value={hours} onChange={(e) => setHours(e.target.value)} placeholder="Hours" className="w-20 p-2.5 bg-white border border-slate-200 rounded-lg text-sm" />
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="flex-1 p-2.5 bg-white border border-slate-200 rounded-lg text-sm" />
+      </div>
+      <select value={category} onChange={(e) => setCategory(e.target.value)} className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm">
+        <optgroup label="Project Phases">{categories.filter(c => ['prelim', 'schematic', 'dd', 'cd', 'bidding', 'ca'].includes(c.id)).map(cat => <option key={cat.id} value={cat.id}>{cat.label}</option>)}</optgroup>
+        <optgroup label="Business">{categories.filter(c => ['meetings', 'bizdev', 'marketing', 'accounting', 'admin', 'learning'].includes(c.id)).map(cat => <option key={cat.id} value={cat.id}>{cat.label}</option>)}</optgroup>
+      </select>
+      <select value={project} onChange={(e) => setProject(e.target.value)} className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm">
+        <option value="">No project</option>
+        {projects.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+      </select>
+      <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Description" className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm" />
+      <div className="flex gap-2 pt-1">
+        <button onClick={() => onSave({ hours: parseFloat(hours) || entry.hours, category, project, date: new Date(date + 'T12:00:00').toISOString(), description })} className="flex-1 px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium">Save</button>
+        <button onClick={onCancel} className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg text-sm font-medium">Cancel</button>
+        <button onClick={onDelete} className="px-4 py-2 text-red-500 hover:bg-red-50 rounded-lg text-sm font-medium"><Trash2 className="w-4 h-4" /></button>
+      </div>
     </div>
   );
 }
