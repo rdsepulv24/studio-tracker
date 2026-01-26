@@ -28,6 +28,8 @@ export default function StudioTracker() {
   const [timeFilter, setTimeFilter] = useState('total');
   const [customDateRange, setCustomDateRange] = useState({ start: '', end: '' });
   const [expandedTimeProjects, setExpandedTimeProjects] = useState({});
+  const [dashboardFilter, setDashboardFilter] = useState('week');
+  const [dashboardCustomDateRange, setDashboardCustomDateRange] = useState({ start: '', end: '' });
 
   const [data, setData] = useState({
     timeEntries: [],
@@ -278,26 +280,31 @@ export default function StudioTracker() {
   const toggleProjectExpanded = (projectId) => { setExpandedProjects(prev => ({ ...prev, [projectId]: !prev[projectId] })); };
   const toggleTimeProjectExpanded = (projectName) => { setExpandedTimeProjects(prev => ({ ...prev, [projectName]: !prev[projectName] })); };
 
-  const getFilteredTimeEntries = () => {
+  const getFilteredTimeEntries = (filter = timeFilter, customRange = customDateRange) => {
     const now = new Date();
     let startDate = null;
-    let endDate = now;
+    let endDate = null;
 
-    switch (timeFilter) {
+    switch (filter) {
       case 'week':
         startDate = new Date(now);
         startDate.setDate(startDate.getDate() - 7);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = now; // Only past entries for week
         break;
       case 'month':
         startDate = new Date(now);
         startDate.setMonth(startDate.getMonth() - 1);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = now; // Only past entries for month
         break;
       case 'year':
-        startDate = new Date(now.getFullYear(), 0, 1);
+        startDate = new Date(2026, 0, 1); // Jan 1, 2026
+        endDate = new Date(2026, 11, 31, 23, 59, 59); // Dec 31, 2026
         break;
       case 'custom':
-        if (customDateRange.start) startDate = new Date(customDateRange.start);
-        if (customDateRange.end) endDate = new Date(customDateRange.end + 'T23:59:59');
+        if (customRange.start) startDate = new Date(customRange.start + 'T00:00:00');
+        if (customRange.end) endDate = new Date(customRange.end + 'T23:59:59');
         break;
       case 'total':
       default:
@@ -312,8 +319,8 @@ export default function StudioTracker() {
     });
   };
 
-  const getEntriesGroupedByProject = () => {
-    const filtered = getFilteredTimeEntries();
+  const getEntriesGroupedByProject = (filter = timeFilter, customRange = customDateRange) => {
+    const filtered = getFilteredTimeEntries(filter, customRange);
     const grouped = {};
 
     filtered.forEach(entry => {
@@ -337,12 +344,27 @@ export default function StudioTracker() {
       .reduce((acc, [key, value]) => { acc[key] = value; return acc; }, {});
   };
 
-  const getFilteredTotalHours = () => {
-    return getFilteredTimeEntries().reduce((sum, e) => sum + e.hours, 0);
+  const getFilteredTotalHours = (filter = timeFilter, customRange = customDateRange) => {
+    return getFilteredTimeEntries(filter, customRange).reduce((sum, e) => sum + e.hours, 0);
   };
 
-  const getFilterLabel = () => {
-    switch (timeFilter) {
+  const getHoursByProject = (filter = timeFilter, customRange = customDateRange) => {
+    return getFilteredTimeEntries(filter, customRange).reduce((acc, e) => {
+      const key = e.project || 'No Project';
+      acc[key] = (acc[key] || 0) + e.hours;
+      return acc;
+    }, {});
+  };
+
+  const getHoursByCategory = (filter = timeFilter, customRange = customDateRange) => {
+    return getFilteredTimeEntries(filter, customRange).reduce((acc, e) => {
+      acc[e.category] = (acc[e.category] || 0) + e.hours;
+      return acc;
+    }, {});
+  };
+
+  const getFilterLabel = (filter = timeFilter) => {
+    switch (filter) {
       case 'week': return 'This Week';
       case 'month': return 'This Month';
       case 'year': return '2026';
@@ -469,20 +491,107 @@ export default function StudioTracker() {
             </div>
 
             <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/60">
-              <div className="flex items-center justify-between mb-5"><h3 className="font-semibold text-slate-800">This Week</h3><div className="text-right"><span className="text-2xl font-light text-slate-800">{totalWeeklyHours.toFixed(1)}</span><span className="text-slate-400 ml-1">hrs</span></div></div>
-              {totalWeeklyHours === 0 ? <div className="text-center py-8 text-slate-400"><Clock className="w-8 h-8 mx-auto mb-2 opacity-40" /><p className="text-sm">No time tracked this week</p></div> : (
+              {/* Dashboard Time Filter */}
+              <div className="flex flex-wrap gap-2 mb-4">
+                {[
+                  { id: 'week', label: 'Week' },
+                  { id: 'month', label: 'Month' },
+                  { id: 'year', label: '2026' },
+                  { id: 'total', label: 'All Time' },
+                  { id: 'custom', label: 'Custom' }
+                ].map(filter => (
+                  <button
+                    key={filter.id}
+                    onClick={() => setDashboardFilter(filter.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${dashboardFilter === filter.id ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                  >
+                    {filter.label}
+                  </button>
+                ))}
+              </div>
+              {dashboardFilter === 'custom' && (
+                <div className="flex gap-2 mb-4">
+                  <input
+                    type="date"
+                    value={dashboardCustomDateRange.start}
+                    onChange={(e) => setDashboardCustomDateRange(prev => ({ ...prev, start: e.target.value }))}
+                    className="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                  />
+                  <input
+                    type="date"
+                    value={dashboardCustomDateRange.end}
+                    onChange={(e) => setDashboardCustomDateRange(prev => ({ ...prev, end: e.target.value }))}
+                    className="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                  />
+                </div>
+              )}
+              <div className="flex items-center justify-between mb-5">
+                <h3 className="font-semibold text-slate-800">{getFilterLabel(dashboardFilter)}</h3>
+                <div className="text-right">
+                  <span className="text-2xl font-light text-slate-800">{getFilteredTotalHours(dashboardFilter, dashboardCustomDateRange).toFixed(1)}</span>
+                  <span className="text-slate-400 ml-1">hrs</span>
+                </div>
+              </div>
+              {getFilteredTotalHours(dashboardFilter, dashboardCustomDateRange) === 0 ? (
+                <div className="text-center py-8 text-slate-400">
+                  <Clock className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                  <p className="text-sm">No time tracked for this period</p>
+                </div>
+              ) : (
                 <>
-                  <div className="mb-5"><div className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-3">By Project</div><div className="space-y-3">
-                    {Object.entries(weeklyHoursByProject).sort(([,a], [,b]) => b - a).map(([projectName, hours]) => {
-                      const percent = totalWeeklyHours > 0 ? (hours / totalWeeklyHours) * 100 : 0;
-                      const project = data.projects.find(p => p.name === projectName);
-                      const projectColor = project?.type === 'commercial' ? '#3b82f6' : '#f59e0b';
-                      return (<div key={projectName}><div className="flex items-center justify-between mb-1.5"><div className="flex items-center gap-2"><span className="text-sm text-slate-700">{projectName}</span>{project && <span className={`text-xs px-1.5 py-0.5 rounded ${project.type === 'commercial' ? 'bg-blue-100 text-blue-600' : 'bg-amber-100 text-amber-600'}`}>{project.type === 'commercial' ? 'Com' : 'Res'}</span>}</div><span className="text-sm font-medium text-slate-800">{hours.toFixed(1)}h</span></div><div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-500" style={{ width: `${percent}%`, backgroundColor: projectName === 'No Project' ? '#94a3b8' : projectColor }} /></div></div>);
-                    })}
-                  </div></div>
-                  <div className="pt-4 border-t border-slate-100"><div className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-3">By Category</div><div className="space-y-3">
-                    {categories.map(cat => { const hours = weeklyHours[cat.id] || 0; if (hours === 0) return null; const percent = totalWeeklyHours > 0 ? (hours / totalWeeklyHours) * 100 : 0; return (<div key={cat.id}><div className="flex items-center justify-between mb-1.5"><span className="text-sm text-slate-600">{cat.label}</span><span className="text-sm font-medium text-slate-800">{hours.toFixed(1)}h</span></div><div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-500" style={{ width: `${percent}%`, backgroundColor: cat.color }} /></div></div>); })}
-                  </div></div>
+                  <div className="mb-5">
+                    <div className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-3">By Project</div>
+                    <div className="space-y-3">
+                      {(() => {
+                        const hoursByProject = getHoursByProject(dashboardFilter, dashboardCustomDateRange);
+                        const totalHours = getFilteredTotalHours(dashboardFilter, dashboardCustomDateRange);
+                        return Object.entries(hoursByProject).sort(([,a], [,b]) => b - a).map(([projectName, hours]) => {
+                          const percent = totalHours > 0 ? (hours / totalHours) * 100 : 0;
+                          const project = data.projects.find(p => p.name === projectName);
+                          const projectColor = project?.type === 'commercial' ? '#3b82f6' : '#f59e0b';
+                          return (
+                            <div key={projectName}>
+                              <div className="flex items-center justify-between mb-1.5">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm text-slate-700">{projectName}</span>
+                                  {project && <span className={`text-xs px-1.5 py-0.5 rounded ${project.type === 'commercial' ? 'bg-blue-100 text-blue-600' : 'bg-amber-100 text-amber-600'}`}>{project.type === 'commercial' ? 'Com' : 'Res'}</span>}
+                                </div>
+                                <span className="text-sm font-medium text-slate-800">{hours.toFixed(1)}h</span>
+                              </div>
+                              <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                                <div className="h-full rounded-full transition-all duration-500" style={{ width: `${percent}%`, backgroundColor: projectName === 'No Project' ? '#94a3b8' : projectColor }} />
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </div>
+                  <div className="pt-4 border-t border-slate-100">
+                    <div className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-3">By Category</div>
+                    <div className="space-y-3">
+                      {(() => {
+                        const hoursByCategory = getHoursByCategory(dashboardFilter, dashboardCustomDateRange);
+                        const totalHours = getFilteredTotalHours(dashboardFilter, dashboardCustomDateRange);
+                        return categories.map(cat => {
+                          const hours = hoursByCategory[cat.id] || 0;
+                          if (hours === 0) return null;
+                          const percent = totalHours > 0 ? (hours / totalHours) * 100 : 0;
+                          return (
+                            <div key={cat.id}>
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className="text-sm text-slate-600">{cat.label}</span>
+                                <span className="text-sm font-medium text-slate-800">{hours.toFixed(1)}h</span>
+                              </div>
+                              <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                                <div className="h-full rounded-full transition-all duration-500" style={{ width: `${percent}%`, backgroundColor: cat.color }} />
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </div>
                 </>
               )}
             </div>
