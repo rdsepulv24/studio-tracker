@@ -25,6 +25,9 @@ export default function StudioTracker() {
   const [expandedProjects, setExpandedProjects] = useState({});
   const [editingEntry, setEditingEntry] = useState(null);
   const [showProjectHoursDetail, setShowProjectHoursDetail] = useState(null);
+  const [timeFilter, setTimeFilter] = useState('total');
+  const [customDateRange, setCustomDateRange] = useState({ start: '', end: '' });
+  const [expandedTimeProjects, setExpandedTimeProjects] = useState({});
 
   const [data, setData] = useState({
     timeEntries: [],
@@ -111,13 +114,37 @@ export default function StudioTracker() {
     setData(newData);
     setSaveStatus('Saving...');
     try {
-      const url = GOOGLE_SCRIPT_URL + '?action=save&data=' + encodeURIComponent(JSON.stringify(newData));
-      const response = await fetch(url, { method: 'GET', redirect: 'follow' });
-      const result = await response.json();
-      setSaveStatus(result.success ? 'Saved ✓' : 'Error');
+      // Use POST to avoid URL length limits
+      const response = await fetch(GOOGLE_SCRIPT_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save', data: newData })
+      });
+      // no-cors means we can't read the response, so we verify with a GET
+      const verifyResponse = await fetch(GOOGLE_SCRIPT_URL + '?action=get', { method: 'GET', redirect: 'follow' });
+      const verifyResult = await verifyResponse.json();
+      if (verifyResult.success && verifyResult.data) {
+        setSaveStatus('Saved ✓');
+      } else {
+        // Fallback to GET method if POST didn't work
+        const url = GOOGLE_SCRIPT_URL + '?action=save&data=' + encodeURIComponent(JSON.stringify(newData));
+        const fallbackResponse = await fetch(url, { method: 'GET', redirect: 'follow' });
+        const fallbackResult = await fallbackResponse.json();
+        setSaveStatus(fallbackResult.success ? 'Saved ✓' : 'Error');
+      }
     } catch (e) {
       console.error('Error saving data:', e);
-      setSaveStatus('Offline');
+      // Try GET as fallback
+      try {
+        const url = GOOGLE_SCRIPT_URL + '?action=save&data=' + encodeURIComponent(JSON.stringify(newData));
+        const response = await fetch(url, { method: 'GET', redirect: 'follow' });
+        const result = await response.json();
+        setSaveStatus(result.success ? 'Saved ✓' : 'Error');
+      } catch (e2) {
+        console.error('Fallback save also failed:', e2);
+        setSaveStatus('Offline');
+      }
     }
     setTimeout(() => setSaveStatus(''), 3000);
   };
@@ -249,6 +276,81 @@ export default function StudioTracker() {
   const weeklyHoursByProject = getWeeklyHoursByProject();
   const totalWeeklyHours = Object.values(weeklyHours).reduce((a, b) => a + b, 0);
   const toggleProjectExpanded = (projectId) => { setExpandedProjects(prev => ({ ...prev, [projectId]: !prev[projectId] })); };
+  const toggleTimeProjectExpanded = (projectName) => { setExpandedTimeProjects(prev => ({ ...prev, [projectName]: !prev[projectName] })); };
+
+  const getFilteredTimeEntries = () => {
+    const now = new Date();
+    let startDate = null;
+    let endDate = now;
+
+    switch (timeFilter) {
+      case 'week':
+        startDate = new Date(now);
+        startDate.setDate(startDate.getDate() - 7);
+        break;
+      case 'month':
+        startDate = new Date(now);
+        startDate.setMonth(startDate.getMonth() - 1);
+        break;
+      case 'year':
+        startDate = new Date(now.getFullYear(), 0, 1);
+        break;
+      case 'custom':
+        if (customDateRange.start) startDate = new Date(customDateRange.start);
+        if (customDateRange.end) endDate = new Date(customDateRange.end + 'T23:59:59');
+        break;
+      case 'total':
+      default:
+        return data.timeEntries;
+    }
+
+    return data.timeEntries.filter(entry => {
+      const entryDate = new Date(entry.date);
+      if (startDate && entryDate < startDate) return false;
+      if (endDate && entryDate > endDate) return false;
+      return true;
+    });
+  };
+
+  const getEntriesGroupedByProject = () => {
+    const filtered = getFilteredTimeEntries();
+    const grouped = {};
+
+    filtered.forEach(entry => {
+      const projectName = entry.project || 'No Project';
+      if (!grouped[projectName]) {
+        grouped[projectName] = { totalHours: 0, phases: {} };
+      }
+      grouped[projectName].totalHours += entry.hours;
+
+      const phase = entry.category;
+      if (!grouped[projectName].phases[phase]) {
+        grouped[projectName].phases[phase] = { hours: 0, entries: [] };
+      }
+      grouped[projectName].phases[phase].hours += entry.hours;
+      grouped[projectName].phases[phase].entries.push(entry);
+    });
+
+    // Sort projects by total hours descending
+    return Object.entries(grouped)
+      .sort(([, a], [, b]) => b.totalHours - a.totalHours)
+      .reduce((acc, [key, value]) => { acc[key] = value; return acc; }, {});
+  };
+
+  const getFilteredTotalHours = () => {
+    return getFilteredTimeEntries().reduce((sum, e) => sum + e.hours, 0);
+  };
+
+  const getFilterLabel = () => {
+    switch (timeFilter) {
+      case 'week': return 'This Week';
+      case 'month': return 'This Month';
+      case 'year': return '2026';
+      case 'custom': return 'Custom Range';
+      case 'total':
+      default: return 'All Time';
+    }
+  };
 
   const getProjectHoursByCategory = (projectName) => {
     return data.timeEntries.filter(e => e.project === projectName).reduce((acc, e) => { acc[e.category] = (acc[e.category] || 0) + e.hours; return acc; }, {});
@@ -423,34 +525,136 @@ export default function StudioTracker() {
               <ChevronRight className="w-5 h-5 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
             </button>
 
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 overflow-hidden">
-              <div className="px-5 py-4 border-b border-slate-100"><h3 className="font-semibold text-slate-800">Recent Entries</h3></div>
-              <div className="divide-y divide-slate-100">
-                {data.timeEntries.slice(-10).reverse().map(entry => (
-                  editingEntry?.id === entry.id ? (
-                    <EditTimeEntryForm
-                      key={entry.id}
-                      entry={entry}
-                      categories={categories}
-                      projects={data.projects}
-                      onSave={(updates) => updateTimeEntry(entry.id, updates)}
-                      onCancel={() => setEditingEntry(null)}
-                      onDelete={() => deleteTimeEntry(entry.id)}
-                    />
-                  ) : (
-                    <div key={entry.id} className="px-5 py-4 group">
-                      <div className="flex items-center justify-between">
-                        <div><div className="font-medium text-slate-800">{categories.find(c => c.id === entry.category)?.label}</div><div className="text-sm text-slate-400 mt-0.5">{entry.project && <span className="text-slate-500">{entry.project} • </span>}{new Date(entry.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div></div>
-                        <div className="flex items-center gap-2">
-                          <div className="text-lg font-medium text-slate-800">{entry.hours}h</div>
-                          <button onClick={() => setEditingEntry(entry)} className="p-2 text-slate-300 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all opacity-0 group-hover:opacity-100"><Edit2 className="w-4 h-4" /></button>
-                        </div>
-                      </div>
-                      {entry.description && <div className="mt-2 text-sm text-slate-500 bg-slate-50 rounded-lg px-3 py-2">{entry.description}</div>}
-                    </div>
-                  )
+            {/* Date Filter Controls */}
+            <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200/60">
+              <div className="flex flex-wrap gap-2 mb-3">
+                {[
+                  { id: 'week', label: 'Week' },
+                  { id: 'month', label: 'Month' },
+                  { id: 'year', label: '2026' },
+                  { id: 'total', label: 'All Time' },
+                  { id: 'custom', label: 'Custom' }
+                ].map(filter => (
+                  <button
+                    key={filter.id}
+                    onClick={() => setTimeFilter(filter.id)}
+                    className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${timeFilter === filter.id ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                  >
+                    {filter.label}
+                  </button>
                 ))}
-                {data.timeEntries.length === 0 && <div className="px-5 py-12 text-center"><Clock className="w-10 h-10 mx-auto mb-3 text-slate-300" /><p className="text-slate-400">No time entries yet</p></div>}
+              </div>
+              {timeFilter === 'custom' && (
+                <div className="flex gap-2 mt-3">
+                  <input
+                    type="date"
+                    value={customDateRange.start}
+                    onChange={(e) => setCustomDateRange(prev => ({ ...prev, start: e.target.value }))}
+                    className="flex-1 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm"
+                    placeholder="Start date"
+                  />
+                  <input
+                    type="date"
+                    value={customDateRange.end}
+                    onChange={(e) => setCustomDateRange(prev => ({ ...prev, end: e.target.value }))}
+                    className="flex-1 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm"
+                    placeholder="End date"
+                  />
+                </div>
+              )}
+              <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between">
+                <span className="text-sm text-slate-500">{getFilterLabel()}</span>
+                <span className="text-lg font-semibold text-slate-800">{getFilteredTotalHours().toFixed(1)} hours</span>
+              </div>
+            </div>
+
+            {/* Hours Grouped by Project */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-100">
+                <h3 className="font-semibold text-slate-800">Hours by Project</h3>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {Object.entries(getEntriesGroupedByProject()).map(([projectName, projectData]) => {
+                  const project = data.projects.find(p => p.name === projectName);
+                  const isExpanded = expandedTimeProjects[projectName];
+                  return (
+                    <div key={projectName} className="bg-white">
+                      <button
+                        onClick={() => toggleTimeProjectExpanded(projectName)}
+                        className="w-full px-5 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`w-3 h-3 rounded-full ${projectName === 'No Project' ? 'bg-slate-400' : project?.type === 'commercial' ? 'bg-blue-500' : 'bg-amber-500'}`} />
+                          <div className="text-left">
+                            <div className="font-medium text-slate-800">{projectName}</div>
+                            <div className="text-xs text-slate-400">{Object.keys(projectData.phases).length} categories</div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-lg font-semibold text-slate-800">{projectData.totalHours.toFixed(1)}h</span>
+                          <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                        </div>
+                      </button>
+                      {isExpanded && (
+                        <div className="px-5 pb-4 space-y-3">
+                          {Object.entries(projectData.phases)
+                            .sort(([, a], [, b]) => b.hours - a.hours)
+                            .map(([phaseId, phaseData]) => {
+                              const cat = categories.find(c => c.id === phaseId);
+                              const percent = projectData.totalHours > 0 ? (phaseData.hours / projectData.totalHours) * 100 : 0;
+                              return (
+                                <div key={phaseId} className="ml-6">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: cat?.color || '#94a3b8' }} />
+                                      <span className="text-sm text-slate-600">{cat?.label || phaseId}</span>
+                                    </div>
+                                    <span className="text-sm font-medium text-slate-700">{phaseData.hours.toFixed(1)}h</span>
+                                  </div>
+                                  <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden ml-4">
+                                    <div className="h-full rounded-full transition-all" style={{ width: `${percent}%`, backgroundColor: cat?.color || '#94a3b8' }} />
+                                  </div>
+                                  {/* Individual entries */}
+                                  <div className="mt-2 ml-4 space-y-1">
+                                    {phaseData.entries.slice().reverse().map(entry => (
+                                      editingEntry?.id === entry.id ? (
+                                        <EditTimeEntryForm
+                                          key={entry.id}
+                                          entry={entry}
+                                          categories={categories}
+                                          projects={data.projects}
+                                          onSave={(updates) => updateTimeEntry(entry.id, updates)}
+                                          onCancel={() => setEditingEntry(null)}
+                                          onDelete={() => deleteTimeEntry(entry.id)}
+                                        />
+                                      ) : (
+                                        <div key={entry.id} className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-slate-50 group text-xs">
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-slate-400">{new Date(entry.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                                            {entry.description && <span className="text-slate-500 truncate max-w-[150px]">{entry.description}</span>}
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <span className="font-medium text-slate-600">{entry.hours}h</span>
+                                            <button onClick={(e) => { e.stopPropagation(); setEditingEntry(entry); }} className="p-1 text-slate-300 hover:text-slate-600 hover:bg-slate-100 rounded transition-all opacity-0 group-hover:opacity-100"><Edit2 className="w-3 h-3" /></button>
+                                          </div>
+                                        </div>
+                                      )
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {Object.keys(getEntriesGroupedByProject()).length === 0 && (
+                  <div className="px-5 py-12 text-center">
+                    <Clock className="w-10 h-10 mx-auto mb-3 text-slate-300" />
+                    <p className="text-slate-400">No time entries for this period</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
